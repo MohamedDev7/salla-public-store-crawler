@@ -9,5 +9,9 @@ create unique index if not exists stores_store_url_unique on stores(lower(store_
 create table if not exists crawl_runs(
  id bigserial primary key,status text not null default 'running',max_stores integer,discovered_count integer not null default 0,created_at timestamptz not null default now(),updated_at timestamptz not null default now()
 );
+create table if not exists discovery_frontier(
+ id bigserial primary key,url text not null unique,depth integer not null default 0,status text not null default 'pending',claimed_run_id bigint references crawl_runs(id) on delete set null,attempts integer not null default 0,last_error text default '',created_at timestamptz not null default now(),updated_at timestamptz not null default now()
+);
+create index if not exists discovery_frontier_status_idx on discovery_frontier(status,depth,id);
 `);
 await db.end();

@@ -5,7 +5,7 @@ import {cfg} from './config.js';
 import {fetcher} from './fetcher.js';
 import {absolute,extractMahally,classifySearchResult,verifyMerchantPage,extractStore,strongClosedEvidence} from './extract.js';
 import {searchStoreIdentity,TavilyError} from './tavily.js';
-import {upsertStore,getRun,reserveStore} from './db.js';
+import {upsertStore,getRun,reserveStore,addFrontier,finishFrontier,claimFrontier,releaseRunFrontier} from './db.js';
 import {safeJobId} from './job-id.js';
 
 const storeHint=/\/stores\/\d+\/?$/i,bad=/\/(login|account|cart|checkout|privacy|terms)\b/i;
@@ -13,15 +13,23 @@ const permanent=k=>['robots','forbidden','http_error','dns'].includes(k);
 function failPermanent(msg){throw new UnrecoverableError(msg)}
 function originOf(url){try{return new URL(url).origin+'/'}catch{return''}}
 
+async function scheduleFrontier(runId){
+ const run=await getRun(runId);if(!run||run.status!=='running')return 0;
+ const rows=await claimFrontier(runId,40);for(const row of rows)await discoveryQueue.add('discover',{url:row.url,depth:row.depth,runId,frontierId:row.id},{jobId:safeJobId(`discover-${runId}`,row.url),attempts:3,backoff:{type:'exponential',delay:3000},removeOnComplete:1000});
+ if(rows.length)console.log(`[frontier:schedule] run=${runId} jobs=${rows.length}`);return rows.length;
+}
+
 const discoveryWorker=new Worker('discovery',async job=>{
- const {url,depth=0,runId}=job.data;console.log(`[discovery:start] job=${job.id} run=${runId} depth=${depth} url=${url}`);
- const run=await getRun(runId);if(!run||run.status!=='running'){console.log(`[discovery:stop] job=${job.id} reason=run_${run?.status||'missing'}`);return{stopped:true};}
- let res;try{res=await fetcher.get(url,'discovery_fetch')}catch(e){console.warn(`[discovery:error] job=${job.id} kind=${e.kind||'unknown'} message=${e.message}`);throw e}
- if(!res.text){console.warn(`[discovery:no_content] job=${job.id} kind=${res.kind||'unknown'} status=${res.status||0}`);if(permanent(res.kind))failPermanent(`${res.kind}: ${url}`);throw new Error(`${res.kind||'fetch_failed'} HTTP ${res.status||0}`)}
+ const {url,depth=0,runId,frontierId}=job.data;console.log(`[discovery:start] job=${job.id} frontier=${frontierId||0} run=${runId} depth=${depth} url=${url}`);
+ const run=await getRun(runId);if(!run||run.status!=='running'){if(frontierId)await finishFrontier(frontierId,'pending','');console.log(`[discovery:stop] job=${job.id} reason=run_${run?.status||'missing'}`);return{stopped:true};}
+ let res;try{res=await fetcher.get(url,'discovery_fetch')}catch(e){if(frontierId&&permanent(e.kind))await finishFrontier(frontierId,'failed',e.message);console.warn(`[discovery:error] job=${job.id} kind=${e.kind||'unknown'} message=${e.message}`);throw e}
+ if(!res.text){console.warn(`[discovery:no_content] job=${job.id} kind=${res.kind||'unknown'} status=${res.status||0}`);if(permanent(res.kind)){if(frontierId)await finishFrontier(frontierId,'failed',`${res.kind}: ${url}`);failPermanent(`${res.kind}: ${url}`);}throw new Error(`${res.kind||'fetch_failed'} HTTP ${res.status||0}`)}
  const $=cheerio.load(res.text);const links=[];
  $('a[href]').each((_,el)=>{const u=absolute($(el).attr('href'),res.url);if(!u)return;let p;try{p=new URL(u)}catch{return}if(cfg.discoveryHosts.has(p.hostname)&&storeHint.test(p.pathname))links.push({store:u.replace(/\?.*$/,''),hint:($(el).text()||'').trim()});if(depth<8&&cfg.discoveryHosts.has(p.hostname)&&!bad.test(p.pathname)&&(/page=\d+/i.test(p.search)||/\/(stores|categories|search|ar)\b/i.test(p.pathname)))links.push({page:u});});
- let stores=0,pages=0;for(const x of links){const current=await getRun(runId);if(!current||current.status!=='running')break;if(x.store){const reserved=await reserveStore(runId,{mahally_url:x.store,store_name:x.hint});if(!reserved.allowed)break;if(reserved.inserted){stores++;await enrichQueue.add('enrich',{mahally_url:x.store,hint:x.hint,runId},{jobId:safeJobId(`enrich-${runId}`,x.store),attempts:3,backoff:{type:'exponential',delay:3000},removeOnComplete:1000});}}else{pages++;await discoveryQueue.add('discover',{url:x.page,depth:depth+1,runId},{jobId:safeJobId(`discover-${runId}`,x.page),attempts:3,backoff:{type:'exponential',delay:3000},removeOnComplete:1000});}}
- console.log(`[discovery:done] job=${job.id} links=${links.length} newStores=${stores} pages=${pages}`);return{links:links.length,newStores:stores,pages};
+ let stores=0,pages=0;for(const x of links){const current=await getRun(runId);if(!current||current.status!=='running')break;if(x.store){const reserved=await reserveStore(runId,{mahally_url:x.store,store_name:x.hint});if(!reserved.allowed)break;if(reserved.inserted){stores++;await enrichQueue.add('enrich',{mahally_url:x.store,hint:x.hint,runId},{jobId:safeJobId(`enrich-${runId}`,x.store),attempts:3,backoff:{type:'exponential',delay:3000},removeOnComplete:1000});}}else{const f=await addFrontier(x.page,depth+1);if(f.status==='pending')pages++;}}
+ if(frontierId)await finishFrontier(frontierId,'done','');
+ const current=await getRun(runId);if(current?.status==='running')await scheduleFrontier(runId);else await releaseRunFrontier(runId);
+ console.log(`[discovery:done] job=${job.id} links=${links.length} newStores=${stores} frontierPages=${pages}`);return{links:links.length,newStores:stores,pages};
 },{connection,concurrency:1});
 
 const enrichWorker=new Worker('enrich',async job=>{

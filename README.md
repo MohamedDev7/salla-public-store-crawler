@@ -54,3 +54,14 @@ Worker logs now show discovery/enrichment stages, HTTP status, timeouts, resolve
 - Platform-owned email addresses (Salla/Mahally) are removed from merchant contacts.
 - Phone/email values are normalized and deduplicated before storage.
 - Social links keep only the first canonical public profile found on the merchant site.
+
+## V2.6 persistent discovery resume
+- Discovery URLs are persisted in PostgreSQL `discovery_frontier` instead of existing only as per-run BullMQ jobs.
+- `/crawl/start?maxStores=N` means N **new** stores for that run; existing stores do not consume the limit.
+- A later crawl resumes from pending frontier URLs instead of reseeding and walking the same completed pages again.
+- Frontier states: `pending`, `processing`, `done`, `failed`. Interrupted `processing` items are recovered to `pending` when a new run starts.
+- Newly discovered crawl pages are persisted before being scheduled, so redeploys do not lose the continuation path.
+- `/stats` now includes `frontier` counts.
+- `/admin/reset` clears the frontier as well as stores/runs/queues, so the next crawl starts from the configured seeds.
+
+**Required once when upgrading to V2.6:** run `npm run migrate` to create `discovery_frontier`.
