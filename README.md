@@ -34,3 +34,7 @@ Export:
 `curl -H "Authorization: Bearer $KEY" "https://host/export.csv" -o stores.csv`
 
 If `ADMIN_API_KEY` is left empty, these endpoints remain unprotected for backward compatibility; production should set it.
+
+
+## V2.2.1 diagnostics
+Worker logs now show discovery/enrichment stages, HTTP status, timeouts, resolver results, retry reasons and permanent failures. Configure `REQUEST_TIMEOUT_MS=10000` (minimum 3000). HTTP 403, robots denial, ordinary non-retryable 4xx, and DNS-not-found are treated as permanent; 429, 5xx, timeouts and transient network errors retry with backoff.
