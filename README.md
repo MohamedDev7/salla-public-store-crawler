@@ -1,4 +1,4 @@
-# Salla Public Store Crawler V2.2
+# Salla Public Store Crawler V2.4
 
 Production crawler for discovering public Salla/Mahally store pages and enriching only from the resolved public merchant storefront.
 
@@ -45,3 +45,21 @@ Worker logs now show discovery/enrichment stages, HTTP status, timeouts, resolve
 - Every candidate is fetched and verified for merchant identity/commerce evidence before `store_url` is persisted.
 - If no candidate can be verified, the store remains in the dataset with `status=mahally_only`, `store_url` blank, and a resolver reason in `last_error`.
 - A duplicate verified `store_url` no longer fails enrichment; the later record safely falls back to `mahally_only`.
+
+
+## V2.4 — Tavily entity resolution
+- Mahally remains the discovery and identity source.
+- The worker extracts the store name plus up to 3 distinctive product titles from the Mahally store page.
+- Exactly one Tavily Basic Search is attempted per enrichment job; no automatic second query is issued.
+- Tavily results are only candidates. Platform/social/search/infrastructure destinations are rejected.
+- Candidate pages are fetched locally and must show commerce evidence plus either store-name identity or a distinctive Mahally product match.
+- When a deep product page verifies the merchant, the crawler normalizes `store_url` to the domain root and fetches that homepage for public contact extraction.
+- If no result verifies, the row is retained as `mahally_only`; no guessed domain is stored.
+
+Worker environment:
+```env
+TAVILY_API_KEY=tvly-...
+TAVILY_MAX_RESULTS=5
+```
+
+`search_depth=basic` is intentionally fixed in code to keep Tavily usage to 1 credit per search.
