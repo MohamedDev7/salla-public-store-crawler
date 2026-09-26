@@ -36,3 +36,6 @@ Limit to 100 stores:
 `curl -X POST -H "Content-Type: application/json" -d '{"maxStores":100}' http://localhost:3000/crawl/start`
 
 You may also use `POST /crawl/start?maxStores=100`. The limit counts newly discovered unique stores. Omitting `maxStores` means unlimited discovery.
+
+## Coolify role-based startup
+Both applications use the same repository and the same `npm start`. Set `ROLE=api` on the API application and `ROLE=worker` on the worker application. The launcher starts the correct process automatically.
