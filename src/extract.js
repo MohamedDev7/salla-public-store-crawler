@@ -9,6 +9,13 @@ const phone=s=>{const x=(s||'').replace(/[^\d+]/g,'');if(/^05\d{8}$/.test(x))ret
 const host=u=>{try{return new URL(u).hostname.toLowerCase().replace(/^www\./,'')}catch{return''}};
 const cleanUrl=(h,base)=>{try{const u=new URL(h,base);if(!/^https?:$/.test(u.protocol))return'';u.hash='';return u.href}catch{return''}};
 const rootMatches=(h,r)=>h===r||h.endsWith('.'+r);
+const tokens=s=>uniq(norm(s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').split(' ').filter(x=>x.length>=3));
+const GENERIC_IDENTITY_TOKENS=new Set(['store','shop','متجر','السعودية','saudi','arabia','official','online','للتجارة','مؤسسة','شركة','company','trading','gmbh','llc']);
+const identityTokens=s=>tokens(s).filter(x=>!GENERIC_IDENTITY_TOKENS.has(x));
+const identityMatch=(expected,head)=>{const a=identityTokens(expected),b=new Set(tokens(head));if(!a.length)return false;const hits=a.filter(x=>b.has(x));return hits.length>=Math.min(2,a.length) || (a.length===1&&hits.length===1&&a[0].length>=5);};
+const PLACEHOLDER_LOCAL=/^(?:test|testing|example|demo|sample|user|username|name|email|your(?:name|email)?|guest|admin|info123|abc|asdf|foo|bar|noreply|no-reply)$/i;
+const RESERVED_EXAMPLE_DOMAINS=new Set(['example.com','example.org','example.net','beispiel.de','example.edu']);
+const plausibleEmail=e=>{const [local,domain]=String(e||'').toLowerCase().split('@');if(!local||!domain)return false;if(PLACEHOLDER_LOCAL.test(local)||RESERVED_EXAMPLE_DOMAINS.has(domain))return false;if(/^(?:your|example|test|demo)[._-]/i.test(local))return false;return true;};
 export function classifyCandidate(url,base,label=''){
  const h=host(url),b=host(base); if(!h||h===b)return{accept:false,reason:'same_host'};
  if(NON_MERCHANT_ROOTS.some(r=>rootMatches(h,r)))return{accept:false,reason:'known_non_merchant'};
@@ -29,7 +36,7 @@ export function verifyMerchantPage(html,url,expectedName='',expectedProducts=[])
  const commerceSignals=[/add[-_ ]?to[-_ ]?cart/i.test(html),/سلة التسوق|أضف للسلة|اضافة للسلة|إتمام الطلب|checkout/i.test(body),$('meta[property="og:type"]').attr('content')==='product',$('a[href*="cart"],a[href*="checkout"],form[action*="cart"]').length>0].filter(Boolean).length;
  if(commerceSignals===0)return{ok:false,reason:'no_commerce_evidence'};
  const expected=norm(expectedName).toLowerCase();
- const identity=expected&&expected.length>2&&head.includes(expected);
+ const identity=expected&&expected.length>2&&identityMatch(expected,head);
  const matchedProducts=uniq((expectedProducts||[]).map(norm).filter(x=>x.length>=4).filter(x=>body.toLowerCase().includes(x.toLowerCase())));
  // Product matches are supporting evidence, not sufficient proof by themselves. This avoids
  // treating marketplaces/listing sites as the merchant merely because they carry the same item.
@@ -49,7 +56,7 @@ export function extractStore(html,url){
  const merchantHost=host(url);
  const platformEmailRoots=['salla.sa','salla.com','mahally.com','salla.dev'];
  const rawEmails=[...$('a[href^="mailto:"]').map((_,e)=>(($(e).attr('href')||'').slice(7).split('?')[0])).get(),...(text.match(emailRx)||[])];
- const emails=uniq(rawEmails.map(x=>norm(x).toLowerCase()).filter(x=>{if(!x||!x.includes('@'))return false;const d=x.split('@').pop();return !platformEmailRoots.some(r=>rootMatches(d,r));}));
+ const emails=uniq(rawEmails.map(x=>norm(x).toLowerCase()).filter(x=>{if(!x||!x.includes('@'))return false;const d=x.split('@').pop();return plausibleEmail(x)&&!platformEmailRoots.some(r=>rootMatches(d,r));}));
  const rawPhones=[...$('a[href^="tel:"]').map((_,e)=>(($(e).attr('href')||'').slice(4))).get(),...$('a[href*="wa.me/"]').map((_,e)=>((($(e).attr('href')||'').match(/wa\.me\/(\d+)/)||[])[1])).get(),...$('a[href*="api.whatsapp.com"]').map((_,e)=>{try{return new URL($(e).attr('href')).searchParams.get('phone')}catch{return''}}).get(),...(text.match(phoneRx)||[])];
  const phones=uniq(rawPhones.map(phone).filter(Boolean));
  const social={instagram:'',x:'',tiktok:'',snapchat:''};

@@ -7,6 +7,7 @@ import {absolute,extractMahally,classifySearchResult,verifyMerchantPage,extractS
 import {searchStoreIdentity,TavilyError} from './tavily.js';
 import {upsertStore,getRun,reserveStore,addFrontier,finishFrontier,claimFrontier,releaseRunFrontier} from './db.js';
 import {safeJobId} from './job-id.js';
+import {canonicalMahallyUrl} from './mahally-id.js';
 
 const storeHint=/\/stores\/\d+\/?$/i,bad=/\/(login|account|cart|checkout|privacy|terms)\b/i;
 const permanent=k=>['robots','forbidden','http_error','dns'].includes(k);
@@ -25,7 +26,7 @@ const discoveryWorker=new Worker('discovery',async job=>{
  let res;try{res=await fetcher.get(url,'discovery_fetch')}catch(e){if(frontierId&&permanent(e.kind))await finishFrontier(frontierId,'failed',e.message);console.warn(`[discovery:error] job=${job.id} kind=${e.kind||'unknown'} message=${e.message}`);throw e}
  if(!res.text){console.warn(`[discovery:no_content] job=${job.id} kind=${res.kind||'unknown'} status=${res.status||0}`);if(permanent(res.kind)){if(frontierId)await finishFrontier(frontierId,'failed',`${res.kind}: ${url}`);failPermanent(`${res.kind}: ${url}`);}throw new Error(`${res.kind||'fetch_failed'} HTTP ${res.status||0}`)}
  const $=cheerio.load(res.text);const links=[];
- $('a[href]').each((_,el)=>{const u=absolute($(el).attr('href'),res.url);if(!u)return;let p;try{p=new URL(u)}catch{return}if(cfg.discoveryHosts.has(p.hostname)&&storeHint.test(p.pathname))links.push({store:u.replace(/\?.*$/,''),hint:($(el).text()||'').trim()});if(depth<8&&cfg.discoveryHosts.has(p.hostname)&&!bad.test(p.pathname)&&(/page=\d+/i.test(p.search)||/\/(stores|categories|search|ar)\b/i.test(p.pathname)))links.push({page:u});});
+ $('a[href]').each((_,el)=>{const u=absolute($(el).attr('href'),res.url);if(!u)return;let p;try{p=new URL(u)}catch{return}if(cfg.discoveryHosts.has(p.hostname)&&storeHint.test(p.pathname))links.push({store:canonicalMahallyUrl(u.replace(/\?.*$/,'')),hint:($(el).text()||'').trim()});if(depth<8&&cfg.discoveryHosts.has(p.hostname)&&!bad.test(p.pathname)&&(/page=\d+/i.test(p.search)||/\/(stores|categories|search|ar)\b/i.test(p.pathname)))links.push({page:u});});
  let stores=0,pages=0;for(const x of links){const current=await getRun(runId);if(!current||current.status!=='running')break;if(x.store){const reserved=await reserveStore(runId,{mahally_url:x.store,store_name:x.hint});if(!reserved.allowed)break;if(reserved.inserted){stores++;await enrichQueue.add('enrich',{mahally_url:x.store,hint:x.hint,runId},{jobId:safeJobId(`enrich-${runId}`,x.store),attempts:3,backoff:{type:'exponential',delay:3000},removeOnComplete:1000});}}else{const f=await addFrontier(x.page,depth+1);if(f.status==='pending')pages++;}}
  if(frontierId)await finishFrontier(frontierId,'done','');
  const current=await getRun(runId);if(current?.status==='running')await scheduleFrontier(runId);else await releaseRunFrontier(runId);
