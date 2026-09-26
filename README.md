@@ -27,3 +27,12 @@ Start crawl with `POST /crawl/start`. Check `GET /stats`. Download current data 
 
 ## Important
 This project only extracts business information visible on public pages. It does not bypass authentication, CAPTCHAs, access controls, or robots.txt. Discovery coverage depends on what public sources expose; no crawler can guarantee every Salla merchant is publicly discoverable.
+
+## Crawl limits
+Unlimited crawl (default):
+`curl -X POST http://localhost:3000/crawl/start`
+
+Limit to 100 stores:
+`curl -X POST -H "Content-Type: application/json" -d '{"maxStores":100}' http://localhost:3000/crawl/start`
+
+You may also use `POST /crawl/start?maxStores=100`. The limit counts newly discovered unique stores. Omitting `maxStores` means unlimited discovery.
