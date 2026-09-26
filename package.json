@@ -1,6 +1,6 @@
 {
   "name": "salla-public-store-crawler-v2",
-  "version": "2.6.1",
+  "version": "2.6.2",
   "type": "module",
   "scripts": {
     "start": "node src/start.js",
