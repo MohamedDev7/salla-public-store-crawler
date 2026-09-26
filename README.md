@@ -1,41 +1,36 @@
-# Salla Public Store Crawler V2
+# Salla Public Store Crawler V2.2
 
-Crawler/enrichment pipeline for public business information. It preserves stores even when contact fields are missing and leaves those fields blank.
+Production crawler for discovering public Salla/Mahally store pages and enriching only from the resolved public merchant storefront.
 
-## Architecture
-- API: starts crawls, exposes stats, records and CSV export.
-- Worker: BullMQ discovery + enrichment workers.
-- PostgreSQL: durable source of truth/checkpoint state.
-- Redis/BullMQ: durable queues, retries and exponential backoff.
-- robots.txt + per-origin delay are honored.
-
-## Quick start
-```bash
-docker compose up -d --build
-curl -X POST http://localhost:3000/crawl/start
-curl http://localhost:3000/stats
-curl -o stores.csv http://localhost:3000/export.csv
-```
+## Important V2.2 fixes
+- Mahally pages are discovery/identity sources only; contacts/socials are never harvested from Mahally's global page payload.
+- Resolves an external merchant storefront first, then extracts public business contacts from that host only.
+- `reachable` means the resolved storefront itself returned readable HTML.
+- `closed_or_maintenance` requires strong storefront-page evidence, not a loose regex over Mahally HTML.
+- `maxStores` reservation is transactional and strict for newly discovered stores.
+- `POST /admin/reset` clears stores, crawl runs and BullMQ jobs.
+- Optional `ADMIN_API_KEY` protects start/reset/export. `/health` and `/stats` remain public.
 
 ## Coolify
-Deploy this repo twice from the same Dockerfile:
-1. API service: `ROLE=api`, expose port 3000.
-2. Worker service: `ROLE=worker`, no public port.
-Attach PostgreSQL and Redis and set `DATABASE_URL` / `REDIS_URL` to their internal URLs.
+Deploy the same repository twice:
+- API: `ROLE=api`
+- Worker: `ROLE=worker`
 
-Start crawl with `POST /crawl/start`. Check `GET /stats`. Download current data from `GET /export.csv` at any time.
+Both use the same `DATABASE_URL` and `REDIS_URL`. Set the same `ADMIN_API_KEY` on API (worker may also receive it harmlessly).
 
-## Important
-This project only extracts business information visible on public pages. It does not bypass authentication, CAPTCHAs, access controls, or robots.txt. Discovery coverage depends on what public sources expose; no crawler can guarantee every Salla merchant is publicly discoverable.
+Run migrations during deploy/once after update:
+`npm run migrate`
 
-## Crawl limits
-Unlimited crawl (default):
-`curl -X POST http://localhost:3000/crawl/start`
+Start limited crawl:
+`curl -X POST -H "Authorization: Bearer $KEY" "https://host/crawl/start?maxStores=100"`
 
-Limit to 100 stores:
-`curl -X POST -H "Content-Type: application/json" -d '{"maxStores":100}' http://localhost:3000/crawl/start`
+Unlimited crawl:
+`curl -X POST -H "Authorization: Bearer $KEY" "https://host/crawl/start"`
 
-You may also use `POST /crawl/start?maxStores=100`. The limit counts newly discovered unique stores. Omitting `maxStores` means unlimited discovery.
+Reset all crawler data and queued jobs:
+`curl -X POST -H "Authorization: Bearer $KEY" "https://host/admin/reset"`
 
-## Coolify role-based startup
-Both applications use the same repository and the same `npm start`. Set `ROLE=api` on the API application and `ROLE=worker` on the worker application. The launcher starts the correct process automatically.
+Export:
+`curl -H "Authorization: Bearer $KEY" "https://host/export.csv" -o stores.csv`
+
+If `ADMIN_API_KEY` is left empty, these endpoints remain unprotected for backward compatibility; production should set it.
