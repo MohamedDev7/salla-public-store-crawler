@@ -1,0 +1,1 @@
+{"name":"salla-public-store-crawler-v2","version":"2.0.0","type":"module","scripts":{"start":"node src/server.js","worker":"node src/worker.js","migrate":"node src/migrate.js"},"dependencies":{"bullmq":"^5.58.5","cheerio":"^1.1.2","express":"^5.1.0","ioredis":"^5.7.0","pg":"^8.16.3","robots-parser":"^3.0.1"}}

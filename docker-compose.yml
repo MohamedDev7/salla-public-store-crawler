@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: crawler
+      POSTGRES_USER: crawler
+      POSTGRES_PASSWORD: crawler-change-me
+    volumes: [pgdata:/var/lib/postgresql/data]
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes: [redisdata:/data]
+  api:
+    build: .
+    environment:
+      ROLE: api
+      DATABASE_URL: postgres://crawler:crawler-change-me@postgres:5432/crawler
+      REDIS_URL: redis://redis:6379
+      USER_AGENT: RawaPublicStoreResearchBot/2.0
+    ports: ["3000:3000"]
+    depends_on: [postgres,redis]
+  worker:
+    build: .
+    environment:
+      ROLE: worker
+      DATABASE_URL: postgres://crawler:crawler-change-me@postgres:5432/crawler
+      REDIS_URL: redis://redis:6379
+      USER_AGENT: RawaPublicStoreResearchBot/2.0
+      WORKER_CONCURRENCY: 3
+      REQUEST_DELAY_MS: 2500
+    depends_on: [postgres,redis]
+volumes: {pgdata: {}, redisdata: {}}
