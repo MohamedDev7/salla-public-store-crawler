@@ -1,4 +1,4 @@
-# Salla Public Store Crawler V2.4
+# Salla Public Store Crawler V2.2
 
 Production crawler for discovering public Salla/Mahally store pages and enriching only from the resolved public merchant storefront.
 
@@ -47,19 +47,10 @@ Worker logs now show discovery/enrichment stages, HTTP status, timeouts, resolve
 - A duplicate verified `store_url` no longer fails enrichment; the later record safely falls back to `mahally_only`.
 
 
-## V2.4 — Tavily entity resolution
-- Mahally remains the discovery and identity source.
-- The worker extracts the store name plus up to 3 distinctive product titles from the Mahally store page.
-- Exactly one Tavily Basic Search is attempted per enrichment job; no automatic second query is issued.
-- Tavily results are only candidates. Platform/social/search/infrastructure destinations are rejected.
-- Candidate pages are fetched locally and must show commerce evidence plus either store-name identity or a distinctive Mahally product match.
-- When a deep product page verifies the merchant, the crawler normalizes `store_url` to the domain root and fetches that homepage for public contact extraction.
-- If no result verifies, the row is retained as `mahally_only`; no guessed domain is stored.
-
-Worker environment:
-```env
-TAVILY_API_KEY=tvly-...
-TAVILY_MAX_RESULTS=5
-```
-
-`search_depth=basic` is intentionally fixed in code to keep Tavily usage to 1 credit per search.
+## V2.5 verification hardening
+- Search-result product overlap alone no longer proves merchant ownership.
+- Known multi-seller marketplaces are rejected before candidate fetch.
+- If the store name is not present in merchant identity surfaces, at least two distinctive Mahally products must match.
+- Platform-owned email addresses (Salla/Mahally) are removed from merchant contacts.
+- Phone/email values are normalized and deduplicated before storage.
+- Social links keep only the first canonical public profile found on the merchant site.
