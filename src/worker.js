@@ -3,7 +3,7 @@ import * as cheerio from 'cheerio';
 import {connection,discoveryQueue,enrichQueue} from './queues.js';
 import {cfg} from './config.js';
 import {fetcher} from './fetcher.js';
-import {absolute,extractMahally,classifySearchResult,verifyMerchantPage,extractStore,strongClosedEvidence} from './extract.js';
+import {absolute,extractMahally,classifySearchResult,verifyMerchantPage,verifyMerchantIdentity,extractStore,strongClosedEvidence} from './extract.js';
 import {searchStoreIdentity,TavilyError} from './tavily.js';
 import {upsertStore,getRun,reserveStore,addFrontier,finishFrontier,claimFrontier,releaseRunFrontier} from './db.js';
 import {safeJobId} from './job-id.js';
@@ -51,9 +51,12 @@ const enrichWorker=new Worker('enrich',async job=>{
   }
   if(!chosen){await upsertStore({mahally_url,store_name:identity.storeName,store_url:'',status:'mahally_only',last_error:`resolver:${lastReason}`,contact_source:''});console.log(`[enrich:done] job=${job.id} status=mahally_only reason=${lastReason} duration=${Date.now()-started}ms`);return{status:'mahally_only',reason:lastReason};}
   const storeRoot=originOf(chosen.probe.url);let merchant=chosen.probe;
-  if(storeRoot&&storeRoot!==chosen.probe.url){try{const home=await fetcher.get(storeRoot,'store_home_fetch');if(home.text)merchant=home;}catch(e){console.warn(`[store_home:fallback] job=${job.id} root=${storeRoot} reason=${e.kind||e.message}`)}}
+  if(storeRoot){try{const home=await fetcher.get(storeRoot,'store_home_fetch');if(home.text)merchant=home;else{console.log(`[resolver:reject] job=${job.id} candidate=${storeRoot} reason=homepage_unavailable`);await upsertStore({mahally_url,store_name:identity.storeName,store_url:'',status:'mahally_only',last_error:'resolver:homepage_unavailable',contact_source:''});return{status:'mahally_only',reason:'homepage_unavailable'};}}catch(e){console.log(`[resolver:reject] job=${job.id} candidate=${storeRoot} reason=homepage_${e.kind||'network'}`);await upsertStore({mahally_url,store_name:identity.storeName,store_url:'',status:'mahally_only',last_error:`resolver:homepage_${e.kind||'network'}`,contact_source:''});return{status:'mahally_only',reason:`homepage_${e.kind||'network'}`};}}
+  const homeIdentity=verifyMerchantIdentity(merchant.text,storeRoot||merchant.url,identity.storeName);
+  if(!homeIdentity.ok){console.log(`[resolver:reject] job=${job.id} candidate=${storeRoot||merchant.url} reason=${homeIdentity.reason}`);await upsertStore({mahally_url,store_name:identity.storeName,store_url:'',status:'mahally_only',last_error:`resolver:${homeIdentity.reason}`,contact_source:''});return{status:'mahally_only',reason:homeIdentity.reason};}
+  console.log(`[resolver:homepage_identity] job=${job.id} candidate=${storeRoot||merchant.url} reason=${homeIdentity.reason}`);
   const data=extractStore(merchant.text,storeRoot||merchant.url);const status=strongClosedEvidence(merchant.text)?'closed_or_maintenance':'reachable';
-  try{await upsertStore({mahally_url,store_name:data.store_name||identity.storeName,store_url:storeRoot||merchant.url,category:data.category,phone_whatsapp:data.phone_whatsapp,email:data.email,instagram:data.instagram,x:data.x,tiktok:data.tiktok,snapchat:data.snapchat,status,contact_source:new URL(storeRoot||merchant.url).hostname,last_error:''});}
+  try{await upsertStore({mahally_url,store_name:identity.storeName,store_url:storeRoot||merchant.url,category:data.category,phone_whatsapp:data.phone_whatsapp,email:data.email,instagram:data.instagram,x:data.x,tiktok:data.tiktok,snapchat:data.snapchat,status,contact_source:new URL(storeRoot||merchant.url).hostname,last_error:''});}
   catch(e){if(e?.code==='23505'){console.warn(`[resolver:reject] job=${job.id} candidate=${storeRoot||merchant.url} reason=store_url_already_owned`);await upsertStore({mahally_url,store_name:identity.storeName,store_url:'',status:'mahally_only',last_error:'resolver:store_url_already_owned',contact_source:''});return{status:'mahally_only',reason:'store_url_already_owned'};}throw e;}
   console.log(`[enrich:done] job=${job.id} status=${status} phone=${data.phone_whatsapp?1:0} email=${data.email?1:0} duration=${Date.now()-started}ms url=${storeRoot||merchant.url}`);return{status};
  }catch(e){if(e?.name==='UnrecoverableError')throw e;console.warn(`[enrich:retry] job=${job.id} attempt=${job.attemptsMade+1} kind=${e.kind||'unknown'} message=${e.message}`);throw e;}

@@ -15,7 +15,18 @@ const identityTokens=s=>tokens(s).filter(x=>!GENERIC_IDENTITY_TOKENS.has(x));
 const identityMatch=(expected,head)=>{const a=identityTokens(expected),b=new Set(tokens(head));if(!a.length)return false;const hits=a.filter(x=>b.has(x));return hits.length>=Math.min(2,a.length) || (a.length===1&&hits.length===1&&a[0].length>=5);};
 const PLACEHOLDER_LOCAL=/^(?:test|testing|example|demo|sample|user|username|name|email|your(?:name|email)?|guest|admin|info123|abc|asdf|foo|bar|noreply|no-reply)$/i;
 const RESERVED_EXAMPLE_DOMAINS=new Set(['example.com','example.org','example.net','beispiel.de','example.edu']);
-const plausibleEmail=e=>{const [local,domain]=String(e||'').toLowerCase().split('@');if(!local||!domain)return false;if(PLACEHOLDER_LOCAL.test(local)||RESERVED_EXAMPLE_DOMAINS.has(domain))return false;if(/^(?:your|example|test|demo)[._-]/i.test(local))return false;return true;};
+const NON_EMAIL_TLDS=new Set(['png','jpg','jpeg','gif','webp','svg','ico','css','js','woff','woff2','ttf','map','avif']);
+const plausibleEmail=e=>{const [local,domain]=String(e||'').toLowerCase().split('@');if(!local||!domain)return false;if(PLACEHOLDER_LOCAL.test(local)||RESERVED_EXAMPLE_DOMAINS.has(domain))return false;if(/^(?:your|example|test|demo)[._-]/i.test(local))return false;const tld=domain.split('.').pop();if(!tld||NON_EMAIL_TLDS.has(tld))return false;if(/(?:^|[._-])(?:2x|3x|icon|logo|sprite|image|img)(?:[._-]|$)/i.test(domain))return false;return true;};
+const domainTokens=url=>{const h=host(url);if(!h)return[];const root=h.split('.').slice(0,-1).join(' ');return identityTokens(root.replace(/[-_.]+/g,' '));};
+function structuredBrandNames($){const out=[];for(const sel of ['meta[property="og:site_name"]','meta[name="application-name"]','meta[name="apple-mobile-web-app-title"]']){const v=norm($(sel).attr('content'));if(v)out.push(v);} $('header img[alt],header [class*="logo"] img[alt],a[class*="logo"] img[alt]').each((_,e)=>{const v=norm($(e).attr('alt'));if(v&&v.length<=100)out.push(v);});$('script[type="application/ld+json"]').each((_,e)=>{try{const j=JSON.parse($(e).text());const walk=x=>{if(!x)return;if(Array.isArray(x))return x.forEach(walk);if(typeof x!=='object')return;const type=[].concat(x['@type']||[]).map(String);if(type.some(t=>/^(Organization|OnlineStore|Store|LocalBusiness|Brand)$/i.test(t))&&x.name)out.push(norm(String(x.name)));Object.values(x).forEach(walk)};walk(j)}catch{}});return uniq(out.filter(Boolean));}
+export function verifyMerchantIdentity(html,url,expectedName=''){
+ const $=cheerio.load(html), expected=norm(expectedName);if(!expected)return{ok:false,reason:'missing_expected_identity'};
+ const brands=structuredBrandNames($);const brandHit=brands.some(x=>identityMatch(expected,x));
+ const dTokens=new Set(domainTokens(url));const expectedTokens=identityTokens(expected);const domainHits=expectedTokens.filter(x=>dTokens.has(x));
+ const domainHit=domainHits.length>=Math.min(2,expectedTokens.length)||(expectedTokens.length===1&&domainHits.length===1&&expectedTokens[0].length>=5);
+ if(brandHit||domainHit)return{ok:true,reason:brandHit?'homepage_brand_identity_match':'domain_identity_match',brands};
+ return{ok:false,reason:'homepage_identity_not_verified',brands};
+}
 export function classifyCandidate(url,base,label=''){
  const h=host(url),b=host(base); if(!h||h===b)return{accept:false,reason:'same_host'};
  if(NON_MERCHANT_ROOTS.some(r=>rootMatches(h,r)))return{accept:false,reason:'known_non_merchant'};
